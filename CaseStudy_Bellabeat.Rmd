@@ -1,0 +1,338 @@
+---
+title: 'Case Study: How can a wellness technology company play it smart?'
+author: "Elena Eggl"
+date: "07/02/2021"
+output: html_document
+---
+## Preface {-}
+
+This case study is performed as capstone project to acquire the "Google Data Analytics Professional Certificate". The work was carried out loosely following the steps outlined in the accompanying case study guide, and following the principles taught in the course: Ask, Prepare, Process, Analyze, Share, Act. The tools used on the study such as SQL or R were chosen to present skills acquired throughout the course. 
+
+## Introduction
+
+Bellabeat is a high-tech manufacturer of health-focused products for women.
+The key stakeholders are the two founders Urška Sršen and Sando Mur and the Bellabeat marketing analystics team.
+
+## Business Task
+
+In order to gain insight into trends how people are already using smart devices, user data from non-Bellabeat smart devices will be analyzed. The insights from this analysis will be used to be compared to one specific Bellabeat product, in the case of this study the _Leaf_ wellness tracker. The goal is to extract valuable information on general consumer trends using smart devices, on how these trends can be applied to Bellabeat customers, and finally on how to adapt the Bellabeat marketing strategy to best target the current market trends concerning the usage of smart devices.
+
+## Data
+
+The data used for this study is the [FitBit Fitness Tracker Data](https://www.kaggle.com/arashnic/fitbit) (CC0: Public Domain, data set made available through [Mobius](https://www.kaggle.com/arashnic))., It is public and open source and therefore availably to everyone.
+The data set contains personal fitness tracker data from 30 FitBit users who consented to the submission of their personal data (for example, physical activity, heart rate and sleep monitoring, as well as daily activity, steps and heart rate). Since it was a professional survey conducted by FitBit, the data is reliable, original and cited. No personal user information is shared (every user is assigned a unique ID), therefore there are no privacy issues.
+
+The data is organized into 18 csv-files. Some of these files carry redundant information, for example calories per minute in narrow and wide format, calories per hour in narrow and wide format, as well as calories per day. For the sake of this analysis, an evaluation on a daily basis seems most appropriate. Some of the smaller tables (dailyIntensities, dailySteps,...) are already contained in the larger file dailyActivity.
+
+There are several issues with the data set. The data is not comprehensive.
+The data set contains only 33 unique data IDs, hence it is not a big data set.
+Data comes only from user who consented to the submission of their personal data, therefore compliance with data ethics should be given. However, since there is no further information on the users who consented to share their data, it's not possible to rule out that they come from a specific group of users and therefore it can't be ruled out that the data is biased. No information on age, gender, or health on the users is available. Also, no information on the type of device the participants used is available.
+Furthermore, only a rather small date range is covered by the collected data. It ranges from a minimum of 4 days up to 31 days of data collection per unique ID, within the date range between April 12, 2016 and May 12, 2016. With the data being around 5 years old, teh data is not current and the some usage trends the data shows might have become outdated in the meantime. 
+
+The analysis could be enhanced by taking into account more data sets, possibly also from users of brands other than FitBit,  a larger date range, and a more recent survey. Knowing the gender of the participants would also be useful, since Bellabeat mainly targets female customers.
+
+## Data cleaning log
+
+With the datasets being quite large for spreadsheet operations and due to the need to join several tables on different variables, I decided to use SQL for the data cleaning activities.
+The csv-Files 
+* dailyActivity_merged.csv
+* SleepDay_merged.csv
+* weightLogInfo_merged.csv
+were imported into the Big Query platform, as an evaluation on a daily basis appears most appropriate to study user trends.
+To be able to import the data, datetime formats were previously replaced by date only formats using a text editor. For the case of the weight log, this was done using a CTE in SQL. 
+The  following SQL query was used to join the tables and change the datetime format in the weight table to the date format:
+````
+WITH weight_data AS
+  (SELECT 
+    Id, 
+    DATE(Date) as Date_only,
+    WeightKg
+  FROM
+    case_study_bellabeat.weight_log)
+
+SELECT 
+  activity.Id,
+  activity.ActivityDate,
+  EXTRACT(DAYOFWEEK FROM activity.ActivityDate) as dayofweek,
+  activity.TotalSteps,
+  activity.TotalDistance,
+  activity.VeryActiveMinutes,
+  activity.FairlyActiveMinutes,
+  activity.LightlyActiveMinutes,
+  activity.SedentaryMinutes,
+  activity.Calories,
+  sleep.TotalMinutesAsleep,
+  sleep.TotalTimeInBed,
+  weight_data.WeightKg
+FROM 
+  case_study_bellabeat.daily_activity activity
+  LEFT JOIN case_study_bellabeat.daily_sleep sleep ON activity.Id = sleep.ID AND activity.ActivityDate = sleep.SleepDay
+  LEFT JOIN weight_data ON activity.Id = weight_data.Id AND activity.ActivityDate = weight_data.Date_only 
+ORDER BY activity.Id, activity.ActivityDate
+````
+The data has been ordered by participant ID and activity date in ascending order. Columns with redundant (such as TrackerDistance) or no (such as LoggedActivitiesDistance) were omitted in the process. Except for the datetime to date conversion, no further format conversion is necessery after checking the format types of the columns.
+
+The cleaned and sorted data can now be exported as a csv-File, which in turn can be imported into R in the next step to perform some visualizations. Further analysis (for example through aggregate functions) will be performed using both SQL and R, for analysis and data visualization.
+
+## Analysis
+
+#### Which features are users using and how frequently?
+
+Evaluate how many users have logged data into different tables:
+````
+SELECT
+    COUNT(DISTINCT activity.Id) AS count_activity_ids,
+    100*(COUNT(DISTINCT activity.Id)/COUNT(DISTINCT activity.Id)) AS percentage_activity,
+    COUNT(DISTINCT sleep.Id) AS count_sleep_ids,
+    ROUND(100*(COUNT(DISTINCT sleep.Id)/COUNT(DISTINCT activity.Id)),1) AS percentage_sleep,
+    COUNT(DISTINCT weight.Id) AS count_weight_ids,
+    ROUND(100*(COUNT(DISTINCT weight.Id)/COUNT(DISTINCT activity.Id)),1) AS percentage_weight
+FROM 
+    case_study_bellabeat.daily_activity AS activity,
+    case_study_bellabeat.daily_sleep AS sleep,
+    case_study_bellabeat.weight_log AS weight
+````
+Result:
+````
+count_activity_ids	percentage_activity	count_sleep_ids	percentage_sleep	count_weight_ids	percentage_weight
+33	100.0	24	72.7	8	24.2
+````
+
+Evaluate how often these users have logged data into the tables:
+````
+WITH weight AS
+  (SELECT 
+    Id, 
+    DATE(Date) as Date_only,
+    WeightKg
+  FROM
+    case_study_bellabeat.weight_log)
+    
+SELECT 
+  activity.Id,
+  COUNT(DISTINCT activity.ActivityDate) AS count_activity_days,
+  COUNT(DISTINCT sleep.SleepDay) AS count_sleep_days,
+  COUNT(DISTINCT weight.Date_only) AS count_weight_days
+FROM 
+  case_study_bellabeat.daily_activity activity
+  LEFT JOIN case_study_bellabeat.daily_sleep sleep ON activity.Id = sleep.ID AND activity.ActivityDate = sleep.SleepDay
+  LEFT JOIN weight ON activity.Id = weight.Id AND activity.ActivityDate = weight.Date_only 
+GROUP BY activity.Id
+````
+Result:
+````
+Id	count_activity_days	count_sleep_days	count_weight_days
+1624580081	31	0	0
+1644430081	30	4	0
+2022484408	31	0	0
+2347167796	18	15	0
+3977333714	30	28	0
+4319703577	31	26	2
+4388161847	31	23	0
+4702921684	31	27	0
+5577150313	30	26	1
+6775888955	26	3	0
+6962181067	31	31	30
+7007744171	26	2	0
+7086361926	31	24	0
+8253242879	19	0	0
+8583815059	31	0	0
+8792009665	29	15	0
+1844505072	31	3	0
+1927972279	31	5	1
+2026352035	31	28	0
+2320127002	31	1	0
+2873212765	31	0	2
+3372868164	20	0	0
+4020332650	31	8	0
+4057192912	4	0	0
+4445114986	31	28	0
+4558609924	31	5	5
+5553957443	31	31	0
+6117666160	28	18	0
+6290855005	29	0	0
+8053475328	31	3	0
+8378563200	31	31	0
+8877689391	31	0	24
+1503960366	31	25	2
+````
+This result and the joined table from the first SQL query can be imported into R for further analysis and later on, visualization.
+
+Importing packages in R:
+```{r importing}
+library(tidyverse)
+```
+
+Import csv files and add a column with 33 consecutive IDs as strings to use later for visualization instead of the 10-digit IDs:
+```{r reading_csvs}
+usage_data <- read_csv("C:\\Users\\elena\\Documents\\R\\R_Files\\CaseStudyBellabeat\\usage_data_joined.csv")
+activities_original <- read_csv("C:\\Users\\elena\\Documents\\R\\R_Files\\CaseStudyBellabeat\\tables_joined.csv")
+
+activities <- activities_original %>% 
+  mutate(Id_new = case_when(
+    Id == 1503960366 ~ "1",
+    Id == 1624580081 ~ "2",
+    Id == 1644430081 ~ "3",
+    Id == 1844505072 ~ "4",
+    Id == 1927972279 ~ "5",
+    Id == 2022484408 ~ "6",
+    Id == 2026352035 ~ "7",
+    Id == 2320127002 ~ "8",
+    Id == 2347167796 ~ "9",
+    Id == 2873212765 ~ "10",
+    Id == 3372868164 ~ "11",
+    Id == 3977333714 ~ "12",
+    Id == 4020332650 ~ "13",
+    Id == 4057192912 ~ "14",
+    Id == 4319703577 ~ "15",
+    Id == 4388161847 ~ "16",
+    Id == 4445114986 ~ "17",
+    Id == 4558609924 ~ "18",
+    Id == 4702921684 ~ "19",
+    Id == 5553957443 ~ "20",
+    Id == 5577150313 ~ "21",
+    Id == 6117666160 ~ "22",
+    Id == 6290855005 ~ "23",
+    Id == 6775888955 ~ "24",
+    Id == 6962181067 ~ "25",
+    Id == 7007744171 ~ "26",
+    Id == 7086361926 ~ "27",
+    Id == 8053475328 ~ "28",
+    Id == 8253242879 ~ "29",
+    Id == 8378563200 ~ "30",
+    Id == 8583815059 ~ "31",
+    Id == 8792009665 ~ "32",
+    Id == 8877689391 ~ "33"))
+```
+
+Convert usage data from wide to a long table:
+```{r widelong}
+usage_data_long <- usage_data %>% 
+  mutate(Id_new = 1:n()) %>% 
+  select(Id_new, count_activity_days, count_sleep_days, count_weight_days) %>% 
+  gather("log_type", "no_days_logged", -Id_new)
+```
+
+## Visualization
+
+While all 33 users logged data into the Activities-Table, only 24 users logged sleep data, and only 8 users logged weight data: 
+
+```{r}
+ggplot(data=usage_data_long, aes(x=Id_new, y=no_days_logged, fill=log_type)) + 
+  geom_col(position="dodge") +
+  labs(title = "Number of usage days for different logs", x = "User Id", y = "Number of days logged") +
+  scale_fill_manual(values = c("#000066", "#6699FF", "#00FFFF"))
+```
+
+Histograms showing the number of days different types of logs were used. 26 of the 31 users (84%) logged activity data on 29 or more days.
+
+```{r}
+ggplot(data = usage_data_long, aes(x=no_days_logged, color=log_type)) +
+  geom_histogram(position="dodge", color="blue", fill="blue", binwidth=3, alpha=0.7) +
+  facet_wrap(~log_type) +
+  labs(title = "Histogram for usage of log types")
+```
+
+Activity of the participants during the 31-day evaluation period, averaged by day over all participants: the number of "very active" and "fairly active" minutes stayed mostly constant during the evaluation period. The number of lightly active and sedentary minutes seems to depend on the duration of data logging per day.
+````{r}
+activities %>% 
+  select(ActivityDate, VeryActiveMinutes, FairlyActiveMinutes, LightlyActiveMinutes, SedentaryMinutes) %>% 
+  group_by(ActivityDate) %>% 
+  summarize(mean4_very_active = mean(VeryActiveMinutes), mean3_fairly_active = mean(FairlyActiveMinutes), 
+            mean2_lightly_active = mean(LightlyActiveMinutes), mean1_sedentary = mean(SedentaryMinutes)) %>% 
+  gather("intensity", "minutes_logged", -ActivityDate) %>% 
+  ggplot(aes(x= ActivityDate, y = minutes_logged, fill=intensity)) + geom_area() +
+  labs(title = "Average number of minutes by activity type during evaluation period", 
+  x = "Activity Date", y = "Average number of minutes")
+````
+
+Average total steps and calories of all participants by day of the week: Friday is the day with the least calories logged. Monday is the day with the fewest number of steps and the shortest distance covered during the week, while Wednesday and Sunday are the days with the highest number of steps and longest distance. There's more than 1000 steps and a bit less than 1 km distance between the most and least active day.
+````{r}
+activities %>% 
+  group_by(dayofweek) %>% 
+  summarize(mean_total_distance = mean(TotalDistance), mean_total_steps = mean(TotalSteps), 
+            mean_calories = mean(Calories)) %>% 
+  gather("measure", "value", -dayofweek) %>% 
+  ggplot(aes(x=dayofweek, y=value, color=measure, fill = measure)) + 
+  geom_col() + facet_wrap(~measure, scale = "free") + 
+  labs(title = "Activity by day of the week", x = "Day of the Week", y = "Calories / KM / No. Steps")
+````
+
+Average number of steps per day per participant: The average number of steps by day differs greatly between participants. Only 14 of the 31 participants achieve more than 8000 steps on average per day, which is the recommended minimum level of good health. 
+````{r}
+activities %>% 
+  group_by(Id_new) %>% 
+  select(Id_new, TotalSteps) %>%
+  summarize(mean_steps_per_day = mean(TotalSteps)) %>% 
+  arrange(-mean_steps_per_day) %>% 
+  ggplot(aes(x=Id_new, y=mean_steps_per_day)) + 
+  geom_col(color = "blue", fill = "blue") +
+  labs(title = "Mean Steps per Day by Participant", x = "User Id", y = "Number of steps")
+````
+
+Mean steps per day vs. number of days logged: the number of steps per day was not correlated to how often the activity logging function was used.
+````{r}
+activities %>% 
+  group_by(Id_new) %>% 
+  select(Id_new, TotalSteps) %>%
+  summarize(mean_steps_per_day = mean(TotalSteps), count_logged = n()) %>% 
+  ggplot(aes(x=count_logged, y=mean_steps_per_day)) + 
+  geom_point() +
+  stat_smooth(method="lm") +
+  labs(title = "Mean Steps per Day vs. Number of Days logged", x = "Number of days logged", y = "Number of steps")
+````
+
+The time asleep is postively correlated with the time in bed:
+````{r}
+activities %>% 
+  select(Id, ActivityDate, dayofweek, TotalMinutesAsleep, TotalTimeInBed) %>% 
+  drop_na() %>% 
+  ggplot(aes(x=TotalTimeInBed, y=TotalMinutesAsleep)) + 
+  geom_point() +
+  stat_smooth(method="lm") +
+  labs(title = "Minutes asleep vs. time in bed", x = "Minutes in bed", y = "Minutes asleep")
+````
+
+Average hours of sleep by day of the week: the longest sleep hours were logged on Mondays.
+````{r}
+activities %>% 
+  select(Id_new, ActivityDate, dayofweek, TotalMinutesAsleep, TotalTimeInBed) %>% 
+  drop_na() %>% 
+  group_by(dayofweek) %>% 
+  summarize(mean_sleep_hours = mean(TotalMinutesAsleep)/60) %>% 
+  ggplot(aes(x=dayofweek, y=mean_sleep_hours)) + 
+  geom_col(color = "blue", fill = "blue") +
+  labs(title = "Sleep hours by day of the week", x = "Day of the Week", y = "Sleep hours")
+````
+
+Average sleep hours by participant: there were large differences in average sleep hours during the evaluation period between the participants. The average recorded sleep hours range from 1 hour to almost 11 hours. Sleep of less than 3 hours (3 users) appears unrealistic and leaves some uncertainty about the validity of the data.
+````{r}
+activities %>% 
+  select(Id_new, ActivityDate, dayofweek, TotalMinutesAsleep, TotalTimeInBed) %>% 
+  drop_na() %>% 
+  group_by(Id_new) %>% 
+  summarize(mean_sleep_hours = mean(TotalMinutesAsleep)/60) %>% 
+  arrange(-mean_sleep_hours) %>% 
+  ggplot(aes(x=Id_new, y=mean_sleep_hours)) + 
+  geom_col() +
+  labs(title = "Sleep hours by participant", x = "Id", y = "Sleep hours")
+````
+
+Weight log: only 8 participants made entries for weight, and only two of these logged their weight on the majoritiy of days of the evaluation period:
+````{r}
+activities %>% 
+  select(Id_new, ActivityDate, WeightKg) %>% 
+  arrange(Id_new) %>% 
+  drop_na() %>% 
+  ggplot(aes(x=ActivityDate, y=WeightKg, color=Id_new)) +
+  geom_point() +
+  labs(title = "Weight log by participant", x = "Date", y = "Weight in Kg")
+````
+
+## Recommendations
+
+* While all participants used the activity logging, with 84% using it on 29 or more days, this logging type seems to be easily done. Much fewer participants used the sleep log, and only 2 participants tracked their weight on a regular basis. Fucntions for sleep and especially weight logging should be made more easily accessible, so they are used more often.
+* The marketing team of Bellabeat should emphasize how Bellabeat products facilitate logging of also sleep and weight data.
+* The Bellabeat fitness tracker could help to motivate its customers do get more active by setting goals on steps per day or activity minutes per day. Customers could receive reminders on their mobile devices to reach their daily goals.
+* Online challenges on daily activity or steps could be set up to motivate customers to use their Bellabeat device more and get more active.
+* More data (higher number of participants, longer evaluation period) should be acquired for a more thorough analysis.
